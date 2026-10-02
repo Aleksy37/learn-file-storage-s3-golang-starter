@@ -83,13 +83,39 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "error reseting temp file's pointer", err)
 	}
 
+	processedPath, err := processVideoForFastStart(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "error processing video for fast start", err)
+	}
+
+	processed, err := os.Open(processedPath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "error creating pointer to processed video file", err)
+	}
+	defer processed.Close()
+
+	aspectRatio, err := getVideoAspectRatio(processedPath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "error finding video aspect ratio", err)
+		return
+	}	
+
 	assetPath := getAssetPath(mediaType)
+	if aspectRatio == "16:9" {
+		assetPath = "landscape/" + assetPath
+	} else if aspectRatio == "9:16" {
+		assetPath = "portrait/" + assetPath
+	} else {
+		assetPath = "other/" + assetPath
+	}
+
 	_, err = cfg.s3Client.PutObject(r.Context(),&s3.PutObjectInput{
 		Bucket: &cfg.s3Bucket,
 		Key: &assetPath,
-		Body: tempFile,
+		Body: processed,
 		ContentType: &mediaType,
 	})
+
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "error uploading file to s3", err)
 		return
